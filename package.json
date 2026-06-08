@@ -1,0 +1,47 @@
+{
+  "name": "erp-bom-processor",
+  "version": "2.0.0",
+  "description": "PCB BOM处理与比对工具 - 将原理图BOM与元件库匹配生成格式化ERP BOM，支持多BOM差异分析",
+  "main": "bin/cli.js",
+  "bin": {
+    "erp-bom": "bin/cli.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "SKILL.md",
+    "install.js",
+    "README.md"
+  ],
+  "keywords": [
+    "bom",
+    "pcb",
+    "erp",
+    "bill-of-materials",
+    "electronics",
+    "component-matching",
+    "bom-diff",
+    "trae",
+    "trae-skill"
+  ],
+  "author": "TRAE IDE",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/trae-ide/erp-bom-processor"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "win32",
+    "darwin",
+    "linux"
+  ],
+  "dependencies": {},
+  "peerDependencies": {},
+  "devDependencies": {}
+}
