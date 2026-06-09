@@ -1,6 +1,6 @@
 {
   "name": "erp-bom-processor",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "PCB BOM处理与比对工具 - 将原理图BOM与元件库匹配生成格式化ERP BOM，支持多BOM差异分析",
   "main": "bin/cli.js",
   "bin": {

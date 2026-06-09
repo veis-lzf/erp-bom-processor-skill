@@ -168,9 +168,13 @@ def find_component_by_value_footprint(lib, value, footprint, reference=None):
     footprint_str = str(footprint).strip().upper()
     ref_str = str(reference).strip().upper() if pd.notna(reference) else ''
     
-    if 'NC' in value_str.upper():
+    val_upper = value_str.upper().strip()
+    if val_upper in ('NP', 'NM', 'NC'):
         return None
-    
+    # 含 /NP /NC _NP _NC 等后缀时，剥离后缀再匹配（备注由 process_bom 主循环负责标记）
+    value_str = re.sub(r'[/_]N[PCM]$', '', value_str.strip(), flags=re.IGNORECASE).strip()
+    value_str = re.sub(r'[/_]N[PCM][/_]', '/', value_str, flags=re.IGNORECASE).strip()
+
     lib_filtered = lib[lib['*(物料)规格型号'].notna()]
     
     if value_str.upper().startswith('RTL') or value_str.upper().startswith('STM') or value_str.upper().startswith('ATMEGA') or value_str.upper().startswith('ESP') or value_str.upper().startswith('GD32') or value_str.upper().startswith('NXP') or value_str.upper().startswith('TI') or value_str.upper().startswith('MICROCHIP') or value_str.upper().startswith('CA-'):
@@ -179,9 +183,11 @@ def find_component_by_value_footprint(lib, value, footprint, reference=None):
         return find_crystal(lib_filtered, value_str, footprint_str)
     elif ref_str.startswith('FB') or 'FB' in footprint_str.upper():
         return find_bead(lib_filtered, value_str, footprint_str)
+    elif footprint_str.startswith('IND') or 'UH' in value_str.upper() or 'NH' in value_str.upper():
+        return find_inductor(lib_filtered, value_str, footprint_str)
     elif footprint_str.startswith('R') or 'RES' in footprint_str or 'OHM' in value_str.upper() or ('K' in value_str and 'F' in value_str) or 'R/' in value_str or (re.match(r'^\d{4}R$', footprint_str) is not None) or ('M/' in value_str and 'F' in value_str) or (footprint_str.endswith('R') and footprint_str[:-1].isdigit()):
         return find_resistor(lib_filtered, value_str, footprint_str)
-    elif footprint_str.startswith('C') or 'CAP' in footprint_str or ('F' in value_str.upper() and not ('K' in value_str and 'F' in value_str) and not 'R/' in value_str and not 'M/' in value_str and not value_str.upper().startswith('RTL') and not value_str.upper().startswith('STM') and not ref_str.startswith('FB') and not (('_' in value_str or '-' in value_str) and not re.search(r'\d+[Vv]$', value_str))):
+    elif footprint_str.startswith('C') or 'CAP' in footprint_str or ('F' in value_str.upper() and re.search(r'^\d', value_str) and not ('K' in value_str and 'F' in value_str) and not 'R/' in value_str and not 'M/' in value_str and not value_str.upper().startswith('RTL') and not value_str.upper().startswith('STM') and not ref_str.startswith('FB') and not (('_' in value_str or '-' in value_str) and not re.search(r'\d+[Vv]$', value_str))):
         return find_capacitor(lib_filtered, value_str, footprint_str)
     elif 'MHZ' in value_str.upper():
         return find_bead(lib_filtered, value_str, footprint_str)
@@ -338,6 +344,77 @@ def find_bead(lib, value_str, footprint_str):
 def remove_special_chars(s):
     return re.sub(r'[_-]', '', s)
 
+def find_inductor(lib, value_str, footprint_str):
+    """电感匹配：解析电感量+额定电流，封装号精确匹配"""
+    value_upper = value_str.upper()
+
+    # 解析电感量，转换为 nH 统一比较
+    # 支持格式：0.47uH、4.7uH、47nH、1uH、0.24uH 等，可带 /4A 后缀
+    inductance_nh = None
+    ind_match = re.search(r'([\d.]+)\s*(U|N)H', value_upper)
+    if ind_match:
+        val = float(ind_match.group(1))
+        unit = ind_match.group(2)
+        inductance_nh = val * 1000 if unit == 'U' else val
+
+    if inductance_nh is None:
+        return find_generic(lib, value_str, footprint_str)
+
+    # 解析额定电流（可选），如 /4A、,4A
+    current_a = None
+    cur_match = re.search(r'[/,]\s*([\d.]+)\s*A\b', value_upper)
+    if cur_match:
+        current_a = float(cur_match.group(1))
+
+    # 从封装中提取封装编号，IND_201610 → 201610，IND_252012 → 252012
+    pkg_match = re.search(r'(\d{4,6})', footprint_str)
+    target_pkg = pkg_match.group(1) if pkg_match else None
+
+    candidates = []
+    for _, row in lib.iterrows():
+        name = str(row['*(物料)名称'])
+        spec = str(row['*(物料)规格型号'])
+        spec_upper = spec.upper()
+
+        # 必须是电感类物料
+        if not any(k in name for k in ['电感', '绕线', 'INDUCTOR']):
+            if 'IND' not in name.upper():
+                continue
+
+        # 解析库中电感量
+        lib_ind_match = re.search(r'([\d.]+)\s*(U|N|μ)H', spec_upper.replace('μ', 'U'))
+        if not lib_ind_match:
+            continue
+        lib_val = float(lib_ind_match.group(1))
+        lib_unit = lib_ind_match.group(2)
+        lib_nh = lib_val * 1000 if lib_unit == 'U' else lib_val
+
+        # 电感量必须精确匹配（允许 0.1% 浮点误差）
+        if abs(lib_nh - inductance_nh) / max(inductance_nh, 1e-9) > 0.001:
+            continue
+
+        score = 10  # 电感量匹配基础分
+
+        # 封装匹配加分
+        if target_pkg and target_pkg in spec:
+            score += 5
+
+        # 额定电流匹配加分（库中提取电流值）
+        if current_a is not None:
+            lib_cur_match = re.search(r'([\d.]+)\s*A\b', spec_upper)
+            if lib_cur_match:
+                lib_cur = float(lib_cur_match.group(1))
+                if abs(lib_cur - current_a) < 0.01:
+                    score += 3
+
+        candidates.append((score, row))
+
+    if candidates:
+        candidates.sort(key=lambda x: -x[0])
+        return candidates[0][1]
+    return None
+
+
 def find_generic(lib, value_str, footprint_str):
     value_upper = value_str.upper()
     footprint_upper = footprint_str.upper() if footprint_str else ''
@@ -437,7 +514,8 @@ def merge_by_part_no(df):
                 'Quantity': 0,
                 'Reference': [],
                 'PCB Footprint': row['PCB Footprint'],
-                'Value': row['Value']
+                'Value': row['Value'],
+                '备注': row['备注'] if '备注' in row.index else ''
             }
         
         merged[key]['Quantity'] += row['Quantity']
@@ -453,7 +531,8 @@ def merge_by_part_no(df):
             'Quantity': data['Quantity'],
             'Reference': ','.join(data['Reference']),
             'PCB Footprint': data['PCB Footprint'],
-            'Value': data['Value']
+            'Value': data['Value'],
+            '备注': data['备注']
         })
     
     return pd.DataFrame(result)
@@ -497,8 +576,17 @@ def process_bom(bom_file, lib_file, output_dir, merge_same_part_no=True):
         if pd.notna(reference) and str(reference).strip().upper().startswith('TP'):
             continue
         
-        if pd.notna(value) and 'NC' in str(value).upper():
+        val_upper = str(value).upper().strip() if pd.notna(value) else ''
+        # value 整体等于 NP/NM/NC：无歧义空贴，直接跳过
+        if val_upper in ('NP', 'NM', 'NC'):
             continue
+        # value 中包含 /NC /NP _NC _NP NC_ NP_：疑似空贴，保留行并标记待确认
+        _NP_PATTERNS = ('/NC', '/NP', '_NC', '_NP')
+        _NP_PREFIXES = ('NC_', 'NP_')
+        is_suspected_dnp = (
+            any(p in val_upper for p in _NP_PATTERNS) or
+            any(val_upper.startswith(p) for p in _NP_PREFIXES)
+        )
         
         found_components = []
         part_no_is_valid = pd.notna(part_no) and str(part_no).strip() != '' and str(part_no).strip() != '/'
@@ -516,7 +604,8 @@ def process_bom(bom_file, lib_file, output_dir, merge_same_part_no=True):
                 found_components = [found_component]
         
         if not found_components:
-            found_component = find_component_by_value_footprint(lib, value, footprint, reference)
+            value_for_match = re.sub(r'[/_]N[PCM]$', '', str(value).strip(), flags=re.IGNORECASE).strip() if pd.notna(value) else value
+            found_component = find_component_by_value_footprint(lib, value_for_match, footprint, reference)
             if found_component is not None:
                 found_components = [found_component]
         
@@ -527,7 +616,7 @@ def process_bom(bom_file, lib_file, output_dir, merge_same_part_no=True):
             
             if part_no_is_valid and not part_name_valid:
                 new_part_name = '未找到匹配'
-            elif part_name_valid and not is_component_model:
+            elif part_name_valid and not is_component_model and part_no_is_valid:
                 new_part_name = part_name
             else:
                 new_part_name = '未找到匹配'
@@ -540,7 +629,8 @@ def process_bom(bom_file, lib_file, output_dir, merge_same_part_no=True):
                 'Quantity': quantity,
                 'Reference': reference,
                 'PCB Footprint': footprint,
-                'Value': value
+                'Value': value,
+                '备注': '⚠️请确认是否空贴' if is_suspected_dnp else ''
             })
         else:
             for found_component in found_components:
@@ -552,7 +642,8 @@ def process_bom(bom_file, lib_file, output_dir, merge_same_part_no=True):
                     'Quantity': quantity,
                     'Reference': reference,
                     'PCB Footprint': footprint,
-                    'Value': value
+                    'Value': value,
+                    '备注': '⚠️请确认是否空贴' if is_suspected_dnp else ''
                 })
     
     result_df = pd.DataFrame(processed_data)
@@ -576,7 +667,15 @@ if __name__ == '__main__':
     
     # 默认配置
     BOM_FILES = glob.glob(os.path.join('03_order', '*.xlsx'))
+    if not BOM_FILES:
+        BOM_FILES = [
+            '03_order/1_RV_S2_BS_MAIN_V05.BOM.xlsx',
+            '03_order/FOC_LKS32MC071_V05_060309.BOM.xlsx',
+            '03_order/PICKER_LK32MC071_V04_0408 BOM.xlsx'
+        ]
     LIB_FILE = sorted(glob.glob(os.path.join('02_BOMfromSystem', '*.xlsx')), reverse=True)
+    if not LIB_FILE:
+        LIB_FILE = ['02_BOMfromSystem/系统电子料库_20260507.xlsx']
     OUTPUT_DIR = '04_output'
     
     # CLI参数支持
