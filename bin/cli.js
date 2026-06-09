@@ -63,11 +63,15 @@ function showHelp() {
 erp-bom <command> [options]
 
 命令:
+  init                  初始化项目目录结构（02_BOMfromSystem/03_order/04_output）
+
   process [bom-file]    处理 BOM 文件，将原理图BOM转换为格式化ERP BOM
                         无参数时批量处理 03_order/ 下所有文件
     
   diff [files...]       比对多份已处理BOM文件，生成差异清单
                         无参数时自动读取 04_output/ 下所有文件
+
+  test                  运行单元测试，验证核心功能是否正常
 
   help                  显示此帮助信息
 
@@ -77,10 +81,12 @@ erp-bom <command> [options]
     pip install pandas openpyxl
 
 示例:
+  erp-bom init
   erp-bom process
   erp-bom process my_bom.xlsx
   erp-bom diff
   erp-bom diff BOM_A_processed.xlsx BOM_B_processed.xlsx
+  erp-bom test
 `);
 }
 
@@ -93,14 +99,42 @@ if (!command || command === 'help' || command === '--help' || command === '-h') 
 }
 
 switch (command) {
+    case 'init':
+        initProject();
+        break;
     case 'process':
         runPython('bom_processor.py', args.slice(1));
         break;
     case 'diff':
         runPython('bom_diff.py', args.slice(1));
         break;
+    case 'test':
+        runPython('test_runner.py', args.slice(1));
+        break;
     default:
         console.error(`未知命令: ${command}`);
         showHelp();
         process.exit(1);
+}
+
+function initProject() {
+    const cwd = process.cwd();
+    const dirs = ['02_BOMfromSystem', '03_order', '04_output'];
+
+    console.log(`初始化 erp-bom 项目结构: ${cwd}\n`);
+
+    dirs.forEach(dir => {
+        const fullPath = path.join(cwd, dir);
+        if (fs.existsSync(fullPath)) {
+            console.log(`  [跳过] ${dir}/ (已存在)`);
+        } else {
+            fs.mkdirSync(fullPath, { recursive: true });
+            console.log(`  [创建] ${dir}/`);
+        }
+    });
+
+    console.log('\n初始化完成！接下来请:');
+    console.log('  1. 将元件库放入 02_BOMfromSystem/');
+    console.log('  2. 将待处理BOM放入 03_order/');
+    console.log('  3. 运行 erp-bom process 开始处理');
 }
