@@ -43,14 +43,23 @@ def read_exp(path):
 
 
 def parse_exp_row(line):
-    """解析一行 EXP 为字段列表"""
-    reader = csv.reader([line], quotechar='"', delimiter='\t', skipinitialspace=True)
-    return next(reader)
+    """解析一行 EXP 为字段列表（直接按 \"\t\" 分割，不用 csv.reader 避免破坏内部引号）"""
+    # EXP 格式：每个字段用双引号包裹，字段间用 tab 分隔
+    # 直接用 "\t 分割即可，去掉首尾引号
+    fields = line.split('\t')
+    # 去掉每个字段的首尾引号
+    fields = [f[1:-1] if (f.startswith('"') and f.endswith('"')) else f for f in fields]
+    return fields
+
+
+def rebuild_exp_row(fields):
+    """将字段列表重建为 EXP 行"""
+    return '\t'.join(f'"{f}"' for f in fields)
 
 
 def write_exp(path, design, header, rows):
     """写 EXP 文件（GBK 编码，兼容 OrCAD）"""
-    with open(path, 'w', encoding='gbk', newline='\r\n', errors='replace') as f:
+    with open(path, 'w', encoding='gbk', newline='\r\n') as f:
         f.write(design + '\n')
         f.write(header + '\n')
         for r in rows:
@@ -163,7 +172,7 @@ def library_update_exp(exp_path, output_path=None):
         # 跳过 TP 测试点
         if ref.upper().startswith('TP'):
             skipped_tp += 1
-            new_rows.append('\t'.join(f'"{f}"' for f in fields))
+            new_rows.append(rebuild_exp_row(fields))
             continue
         
         # 尝试用料号查库
@@ -193,7 +202,7 @@ def library_update_exp(exp_path, output_path=None):
                 'Part NO': part_no,
             })
         
-        new_rows.append('\t'.join(f'"{f}"' for f in fields))
+        new_rows.append(rebuild_exp_row(fields))
     
     if output_path is None:
         base, ext = os.path.splitext(os.path.basename(exp_path))
@@ -283,7 +292,7 @@ def bom_update_exp(bom_path, exp_path, output_path=None):
         # 跳过 TP 测试点
         if ref.upper().startswith('TP'):
             skipped_tp += 1
-            new_rows.append('\t'.join(f'"{f}"' for f in fields))
+            new_rows.append(rebuild_exp_row(fields))
             continue
         
         updated = False
@@ -314,7 +323,7 @@ def bom_update_exp(bom_path, exp_path, output_path=None):
         if not updated:
             no_match += 1
         
-        new_rows.append('\t'.join(f'"{f}"' for f in fields))
+        new_rows.append(rebuild_exp_row(fields))
     
     if output_path is None:
         base, ext = os.path.splitext(os.path.basename(exp_path))
