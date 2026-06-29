@@ -6,7 +6,20 @@ def load_bom_data(bom_file_path):
     return pd.read_excel(bom_file_path)
 
 def load_component_library(lib_file_path):
-    return pd.read_excel(lib_file_path)
+    lib = pd.read_excel(lib_file_path)
+    # 兼容新旧两种列名格式
+    col_map = {}
+    for col in lib.columns:
+        col_stripped = col.strip().replace('*', '').replace('(', '').replace(')', '')
+        if col_stripped == '物料编码' or col_stripped == '编码':
+            col_map[col] = '(物料)编码'
+        elif col_stripped == '物料名称' or col_stripped == '名称':
+            col_map[col] = '*(物料)名称'
+        elif col_stripped == '物料规格型号' or col_stripped == '规格型号':
+            col_map[col] = '*(物料)规格型号'
+    if col_map:
+        lib = lib.rename(columns=col_map)
+    return lib
 
 def parse_resistor_value(value_str):
     original_value = str(value_str).strip()
@@ -438,10 +451,13 @@ def find_generic(lib, value_str, footprint_str):
         spec_clean = remove_special_chars(spec)
         
         score = 0
+        value_matched = False
         if value_upper in spec or value_clean in spec_clean:
             score += 2
+            value_matched = True
         if value_upper in name:
             score += 1
+            value_matched = True
         if footprint_upper in spec or footprint_upper in name:
             score += 1
         
@@ -449,11 +465,15 @@ def find_generic(lib, value_str, footprint_str):
             score += 3
         
         if score > 0:
-            candidates.append((score, row))
+            candidates.append((score, value_matched, row))
     
     if candidates:
-        candidates.sort(key=lambda x: -x[0])
-        return candidates[0][1]
+        # 过滤：至少有一个候选匹配到了值，或通过封装关键词匹配
+        valid = [c for c in candidates if c[1] or (footprint_key and c[0] >= 3)]
+        if not valid:
+            return None
+        valid.sort(key=lambda x: -x[0])
+        return valid[0][2]
     return None
 
 def find_crystal(lib, value_str, footprint_str, return_all=False):
@@ -496,7 +516,9 @@ def find_crystal(lib, value_str, footprint_str, return_all=False):
     return None if not return_all else []
 
 def merge_by_part_no(df):
+    """合并相同料号的行（含 NC/NP 标记的行与不含的分开合并）"""
     merged = {}
+    has_remark_col = '备注' in df.columns
     
     for _, row in df.iterrows():
         part_no = row['Part NO.']
@@ -504,6 +526,9 @@ def merge_by_part_no(df):
             key = f"UNKNOWN_{row.name}"
         else:
             key = part_no
+            # 含空贴标记的行与不含的分开，避免 NC 标记污染非 NC 行
+            if has_remark_col and row['备注'] and '请确认是否空贴' in str(row['备注']):
+                key = f"{part_no}__DNP"
         
         if key not in merged:
             merged[key] = {
@@ -515,7 +540,8 @@ def merge_by_part_no(df):
                 'Reference': [],
                 'PCB Footprint': row['PCB Footprint'],
                 'Value': row['Value'],
-                '备注': row['备注'] if '备注' in row.index else ''
+                '备注': row['备注'] if has_remark_col else '',
+                '库索引料号': row.get('库索引料号', '')
             }
         
         merged[key]['Quantity'] += row['Quantity']
@@ -532,9 +558,10 @@ def merge_by_part_no(df):
             'Reference': ','.join(data['Reference']),
             'PCB Footprint': data['PCB Footprint'],
             'Value': data['Value'],
-            '备注': data['备注']
+            '备注': data['备注'],
+            '库索引料号': data.get('库索引料号', '')
         })
-    
+        
     return pd.DataFrame(result)
 
 def process_bom(bom_file, lib_file, output_dir, merge_same_part_no=True):
@@ -589,7 +616,7 @@ def process_bom(bom_file, lib_file, output_dir, merge_same_part_no=True):
         )
         
         found_components = []
-        part_no_is_valid = pd.notna(part_no) and str(part_no).strip() != '' and str(part_no).strip() != '/'
+        part_no_is_valid = pd.notna(part_no) and str(part_no).strip() != '' and str(part_no).strip() != '/' and str(part_no).strip() != '0'
         
         if part_no_is_valid:
             found_component = find_component_by_part_no(lib, part_no)
@@ -608,6 +635,16 @@ def process_bom(bom_file, lib_file, output_dir, merge_same_part_no=True):
             found_component = find_component_by_value_footprint(lib, value_for_match, footprint, reference)
             if found_component is not None:
                 found_components = [found_component]
+        
+        # 库索引料号：通过 value+footprint 在库中匹配（剥离 /NC /NP 后缀）
+        lib_index_pn = ''
+        value_for_lib = value
+        if pd.notna(value):
+            value_for_lib = re.sub(r'[/_]N[PCM]$', '', str(value).strip(), flags=re.IGNORECASE).strip()
+        if pd.notna(value_for_lib) and value_for_lib:
+            lib_component = find_component_by_value_footprint(lib, value_for_lib, footprint, reference)
+            if lib_component is not None:
+                lib_index_pn = lib_component['(物料)编码']
         
         if not found_components:
             new_part_no = part_no if part_no_is_valid else ''
@@ -630,7 +667,8 @@ def process_bom(bom_file, lib_file, output_dir, merge_same_part_no=True):
                 'Reference': reference,
                 'PCB Footprint': footprint,
                 'Value': value,
-                '备注': '⚠️请确认是否空贴' if is_suspected_dnp else ''
+                '备注': '⚠️请确认是否空贴' if is_suspected_dnp else '',
+                '库索引料号': lib_index_pn
             })
         else:
             for found_component in found_components:
@@ -643,7 +681,8 @@ def process_bom(bom_file, lib_file, output_dir, merge_same_part_no=True):
                     'Reference': reference,
                     'PCB Footprint': footprint,
                     'Value': value,
-                    '备注': '⚠️请确认是否空贴' if is_suspected_dnp else ''
+                    '备注': '⚠️请确认是否空贴' if is_suspected_dnp else '',
+                    '库索引料号': lib_index_pn
                 })
     
     result_df = pd.DataFrame(processed_data)

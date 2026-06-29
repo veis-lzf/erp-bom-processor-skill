@@ -73,6 +73,10 @@ erp-bom <command> [options]
 
   test                  运行单元测试，验证核心功能是否正常
 
+  exp-to-bom <exp>       从 OrCAD EXP 文件提取 BOM，相同物料合并
+  exp-lib-update <exp>   用元件库更新 EXP 中的描述和料号
+  exp-bom-update <bom> <exp>  用 BOM+库 更新 EXP 文件
+
   help                  显示此帮助信息
 
 环境要求:
@@ -87,6 +91,9 @@ erp-bom <command> [options]
   erp-bom diff
   erp-bom diff BOM_A_processed.xlsx BOM_B_processed.xlsx
   erp-bom test
+  erp-bom exp-to-bom my_design.EXP
+  erp-bom exp-lib-update my_design.EXP
+  erp-bom exp-bom-update my_bom.xlsx my_design.EXP
 `);
 }
 
@@ -110,6 +117,15 @@ switch (command) {
         break;
     case 'test':
         runPython('test_runner.py', args.slice(1));
+        break;
+    case 'exp-to-bom':
+        runPython('exp_processor.py', ['to-bom'].concat(args.slice(1)));
+        break;
+    case 'exp-lib-update':
+        runPython('exp_processor.py', ['lib-update'].concat(args.slice(1)));
+        break;
+    case 'exp-bom-update':
+        runPython('exp_processor.py', ['bom-update'].concat(args.slice(1)));
         break;
     default:
         console.error(`未知命令: ${command}`);

@@ -28,6 +28,20 @@ description: "处理PCB BOM文件进行元件库匹配、值/封装搜索和格�
 | B2 | 运行 BOM 比对脚本（需先从源码包复制 `bom_diff.py`：`copy erp-bom-processor\scripts\bom_diff.py .`，然后 `python bom_diff.py <文件1> <文件2> ...`） | 文件路径列表 | `BOM差异清单.xlsx` |
 | B3 | 🔴 CHECKPOINT — 验证差异：确认独有物料、数量变化的合理性 | 差异清单 | 验证通过 / 需排查 |
 
+### 场景 C: OrCAD EXP 文件处理
+
+| 步骤 | 操作 | 输入 | 输出 |
+|------|------|------|------|
+| C1 | EXP→BOM：提取 Part Reference/Value/DESCRIPTION/Part NO./Part Name/PCB Footprint，合并相同物料 | `.EXP` 文件 | `_BOM_from_EXP.xlsx` |
+| C2 | Library→EXP：用元件库更新 EXP 中的 DESCRIPTION/Part NO./Part Name | `.EXP` 文件 + 元件库 | `_updated.EXP` |
+| C3 | BOM+Library→EXP：用处理后的 BOM 和元件库更新 EXP | `.xlsx` + `.EXP` | `_fromBOM.EXP` |
+
+| 命令 | 说明 |
+|------|------|
+| `erp-bom exp-to-bom <exp>` | EXP 文件 → 提取 BOM |
+| `erp-bom exp-lib-update <exp>` | 库更新 EXP 描述字段 |
+| `erp-bom exp-bom-update <bom> <exp>` | BOM+库 → 更新 EXP |
+
 ---
 
 ## 概述
@@ -56,6 +70,7 @@ description: "处理PCB BOM文件进行元件库匹配、值/封装搜索和格�
 
 | 文件 | 源路径 | 用途 |
 |------|--------|------|
+| `exp_processor.py` | `erp-bom-processor/scripts/exp_processor.py` | OrCAD EXP 文件处理器（提取BOM/更新EXP） |
 | `bom_diff.py` | `erp-bom-processor/scripts/bom_diff.py` | BOM 差异比对脚本 |
 | `test_runner.py` | `erp-bom-processor/scripts/test_runner.py` | 自动化测试运行器 |
 | `install.js` | `erp-bom-processor/install.js` | npm 安装脚本 |
@@ -493,7 +508,8 @@ OUTPUT_DIR = '04_output'
 | **v1.0** | 完整功能实现，7类元件匹配，3份BOM自测通过 |
 | **v1.1** | 新增 `bom_diff.py` 多BOM差异比对 |
 | **v2.1.0** | 新增电感匹配、NP/NC/NM空贴检测与备注列、CLI参数支持 |
-| **v2.2.0** | 当前版本 |
+| **v2.3.0** | SKILL 文档全面升级（Agent 执行流程/失败模式表/反例黑名单） |
+| **v2.4.0** | 当前版本 |
 
 ## 修复历史
 
