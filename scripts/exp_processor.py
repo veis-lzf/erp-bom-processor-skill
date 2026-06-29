@@ -30,7 +30,7 @@ COL_IDX = {
 
 def read_exp(path):
     """读取 EXP 文件，返回 (design_line, header_line, rows)"""
-    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+    with open(path, 'r', encoding='gbk', errors='replace') as f:
         lines = f.readlines()
     design = lines[0].rstrip('\n')
     header = lines[1].rstrip('\n')
@@ -49,8 +49,8 @@ def parse_exp_row(line):
 
 
 def write_exp(path, design, header, rows):
-    """写 EXP 文件"""
-    with open(path, 'w', encoding='utf-8', newline='\r\n') as f:
+    """写 EXP 文件（GBK 编码，兼容 OrCAD）"""
+    with open(path, 'w', encoding='gbk', newline='\r\n', errors='replace') as f:
         f.write(design + '\n')
         f.write(header + '\n')
         for r in rows:
@@ -151,11 +151,20 @@ def library_update_exp(exp_path, output_path=None):
     
     updated = 0
     no_match = 0
+    skipped_tp = 0
+    no_match_list = []
     new_rows = []
     
     for line in rows:
         fields = parse_exp_row(line)
+        ref = fields[COL_IDX['Part Reference']]
         part_no = fields[COL_IDX['Part NO']]
+        
+        # 跳过 TP 测试点
+        if ref.upper().startswith('TP'):
+            skipped_tp += 1
+            new_rows.append('\t'.join(f'"{f}"' for f in fields))
+            continue
         
         # 尝试用料号查库
         found = None
@@ -166,7 +175,6 @@ def library_update_exp(exp_path, output_path=None):
         if found is None:
             value = fields[COL_IDX['Value']]
             footprint = fields[COL_IDX['PCB Footprint']]
-            ref = fields[COL_IDX['Part Reference']]
             if value and footprint:
                 found = bm.find_component_by_value_footprint(lib, value, footprint, ref)
         
@@ -178,6 +186,12 @@ def library_update_exp(exp_path, output_path=None):
             updated += 1
         else:
             no_match += 1
+            no_match_list.append({
+                'Reference': ref,
+                'Value': fields[COL_IDX['Value']],
+                'PCB Footprint': fields[COL_IDX['PCB Footprint']],
+                'Part NO': part_no,
+            })
         
         new_rows.append('\t'.join(f'"{f}"' for f in fields))
     
@@ -187,7 +201,36 @@ def library_update_exp(exp_path, output_path=None):
     
     write_exp(output_path, design, header, new_rows)
     print(f'  输出: {output_path}')
-    print(f'  更新: {updated}, 未匹配: {no_match}')
+    print(f'  更新: {updated}, 未匹配: {no_match}, 跳过TP: {skipped_tp}')
+    
+    if no_match_list:
+        # 生成详细未匹配清单（不合并，保留所有 Reference）
+        um_df = pd.DataFrame(no_match_list)
+        um_df = um_df.rename(columns={
+            'Reference': '位号', 'Value': '属性值',
+            'PCB Footprint': '封装', 'Part NO': '原料号'
+        })
+        um_df.insert(0, '序号', range(1, len(um_df)+1))
+        
+        base_nm = os.path.splitext(os.path.basename(exp_path))[0]
+        um_path = os.path.join('04_output', f'{base_nm}_未匹配物料清单.xlsx')
+        um_df.to_excel(um_path, index=False)
+        print(f'\n  未匹配清单: {um_path} ({len(um_df)} 项)')
+        
+        # 控制台摘要
+        seen = set()
+        unique_um = []
+        for item in no_match_list:
+            k = f"{item['Value']}|{item['PCB Footprint']}"
+            if k not in seen:
+                seen.add(k)
+                unique_um.append(item)
+        print(f'  去重后: {len(unique_um)} 种')
+        for item in unique_um[:20]:
+            print(f'    {item["Reference"]} | {item["Value"]} | {item["PCB Footprint"]} | PN={item["Part NO"]}')
+        if len(unique_um) > 20:
+            print(f'    ... 还有 {len(unique_um)-20} 种')
+    
     return output_path
 
 
@@ -229,12 +272,19 @@ def bom_update_exp(bom_path, exp_path, output_path=None):
     updated_bom = 0
     updated_lib = 0
     no_match = 0
+    skipped_tp = 0
     new_rows = []
     
     for line in rows:
         fields = parse_exp_row(line)
         ref = fields[COL_IDX['Part Reference']]
         cur_pn = fields[COL_IDX['Part NO']]
+        
+        # 跳过 TP 测试点
+        if ref.upper().startswith('TP'):
+            skipped_tp += 1
+            new_rows.append('\t'.join(f'"{f}"' for f in fields))
+            continue
         
         updated = False
         
@@ -272,7 +322,7 @@ def bom_update_exp(bom_path, exp_path, output_path=None):
     
     write_exp(output_path, design, header, new_rows)
     print(f'  输出: {output_path}')
-    print(f'  BOM更新: {updated_bom}, 库描述更新: {updated_lib}, 未匹配: {no_match}')
+    print(f'  BOM更新: {updated_bom}, 库描述更新: {updated_lib}, 未匹配: {no_match}, 跳过TP: {skipped_tp}')
     return output_path
 
 
