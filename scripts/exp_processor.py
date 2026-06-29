@@ -23,7 +23,8 @@ COL_IDX = {
     'Description': 9,      # 描述字段2
     'PCB Footprint': 30,   # PCB 封装
     'Part NO': 33,         # 料号
-    'Part Name': 34,       # 零件名
+    'Part Name': 34,       # 零件名 ← 规格型号
+    'Part Type': 36,       # 元件类型 ← 名称
     'DNP': 8,              # 不焊接标记
 }
 
@@ -189,7 +190,8 @@ def library_update_exp(exp_path, output_path=None):
         
         if found is not None:
             fields[COL_IDX['Part NO']] = str(found['(物料)编码'])
-            fields[COL_IDX['Part Name']] = str(found['*(物料)名称'])
+            fields[COL_IDX['Part Name']] = str(found['*(物料)规格型号'])
+            fields[COL_IDX['Part Type']] = str(found['*(物料)名称'])
             fields[COL_IDX['DESCRIPTION']] = str(found['*(物料)规格型号'])
             fields[COL_IDX['Description']] = str(found['*(物料)规格型号'])
             updated += 1
@@ -302,19 +304,19 @@ def bom_update_exp(bom_path, exp_path, output_path=None):
             bom_pn, bom_name, bom_spec = bom_refs[ref]
             if bom_pn and bom_pn not in ('<null>', 'Needless_Part_Number', '0', '', 'nan'):
                 fields[COL_IDX['Part NO']] = str(bom_pn)
-                fields[COL_IDX['Part Name']] = str(bom_name) if bom_name else fields[COL_IDX['Part Name']]
+                fields[COL_IDX['Part Name']] = str(bom_spec) if bom_spec else fields[COL_IDX['Part Name']]
                 fields[COL_IDX['DESCRIPTION']] = str(bom_spec) if bom_spec else fields[COL_IDX['DESCRIPTION']]
                 fields[COL_IDX['Description']] = str(bom_spec) if bom_spec else fields[COL_IDX['Description']]
                 updated = True
                 updated_bom += 1
         
-        # 再用库更新 DESCRIPTION（即使 BOM 已有料号，也去库取最新描述）
+        # 再用库更新（即使 BOM 已有料号，也去库取最新描述和类型）
         new_pn = fields[COL_IDX['Part NO']]
         if new_pn and new_pn not in ('<null>', 'Needless_Part_Number', '0', ''):
             found = bm.find_component_by_part_no(lib, new_pn)
             if found is not None:
-                if not updated:
-                    fields[COL_IDX['Part Name']] = str(found['*(物料)名称'])
+                fields[COL_IDX['Part Name']] = str(found['*(物料)规格型号'])
+                fields[COL_IDX['Part Type']] = str(found['*(物料)名称'])
                 fields[COL_IDX['DESCRIPTION']] = str(found['*(物料)规格型号'])
                 fields[COL_IDX['Description']] = str(found['*(物料)规格型号'])
                 updated_lib += 1
