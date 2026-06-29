@@ -299,14 +299,17 @@ def bom_update_exp(bom_path, exp_path, output_path=None):
         
         updated = False
         
-        # 优先用 BOM 的料号
+        # 优先用 BOM 的数据刷新 EXP
         if ref in bom_refs:
             bom_pn, bom_name, bom_spec = bom_refs[ref]
             if bom_pn and bom_pn not in ('<null>', 'Needless_Part_Number', '0', '', 'nan'):
                 fields[COL_IDX['Part NO']] = str(bom_pn)
-                fields[COL_IDX['Part Name']] = str(bom_spec) if bom_spec else fields[COL_IDX['Part Name']]
-                fields[COL_IDX['DESCRIPTION']] = str(bom_spec) if bom_spec else fields[COL_IDX['DESCRIPTION']]
-                fields[COL_IDX['Description']] = str(bom_spec) if bom_spec else fields[COL_IDX['Description']]
+                if bom_spec:
+                    fields[COL_IDX['Part Name']] = str(bom_spec)
+                    fields[COL_IDX['DESCRIPTION']] = str(bom_spec)
+                    fields[COL_IDX['Description']] = str(bom_spec)
+                if bom_name and bom_name not in ('<null>', 'nan', ''):
+                    fields[COL_IDX['Part Type']] = str(bom_name)
                 updated = True
                 updated_bom += 1
         
